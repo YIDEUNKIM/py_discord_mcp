@@ -1,10 +1,8 @@
-"""From Discord data to Claude for MCP"""
-
+"""From Discord data to Claude Desktop for MCP"""
 from . import McpServer
 import asyncio
 import warnings
 import tracemalloc
-
 
 __version__ = "0.1.0" # MCP library version
 
