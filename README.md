@@ -2,15 +2,14 @@
 
 ## Advanced Python Programming Team Project
 
-## Project Structure
-discord-mcp    
-        ├── src
-        │     ├── McpServer.py
-        │     └── __init__.py
-        ├── Dockerfile
-        ├── README.md
-        ├── pyproject.toml
-        └── uv.lock
+```bash
+ㄴ 📂 src
+   ㄴ 📂 __init__.py
+   ㄴ 📂 mcp_server
+ㄴ 📂 Dockerfile
+ㄴ 📂 pyproject.toml
+ㄴ 📂 uv.lock
+```
 
 
 ### git PR / commit
