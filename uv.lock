@@ -1,3 +1,59 @@
 # UV 패키지 매니저의 의존성 잠금(lock) 파일
 # 의존성 버전 고정, 설치 최적화
 
+version = 1
+requires-python = ">=3.10"
+
+[[package]]
+name = "discord-mcp"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "discord-py" },
+    { name = "mcp" },
+]
+
+[[package]]
+name = "discord-py"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+]
+
+[[package]]
+name = "mcp"
+version = "1.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpx" },
+    { name = "httpx-sse" },
+    { name = "pydantic" },
+    { name = "sse-starlette" },
+    { name = "starlette" },
+]
+
+[[package]]
+name = "aiohttp"
+version = "3.11.11"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohappyeyeballs" },
+    { name = "aiosignal" },
+    { name = "attrs" },
+    { name = "frozenlist" },
+    { name = "multidict" },
+    { name = "propcache" },
+    { name = "yarl" },
+]
+
+[[package]]
+name = "pydantic"
+version = "2.10.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "annotated-types" },
+    { name = "pydantic-core" },
+    { name = "typing-extensions" },
+]

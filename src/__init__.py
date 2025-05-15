@@ -21,7 +21,7 @@ def main():
 
     try:
         # 비동기 실행 제어
-        asyncio.run(McpServer.main())
+        asyncio.run(mcp_server.main())
     except KeyboardInterrupt:
         print("Shut Down by KeyboardInterrupt...")
 
@@ -30,6 +30,4 @@ def main():
         raise
 
 # package level 에서 중요한 items 를 미리 보여줌
-__all__ = ['main', 'mcp_server.py']
-
-
+__all__ = ['main', 'mcp_server']
