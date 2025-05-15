@@ -1,5 +1,5 @@
 """From Discord data to Claude Desktop for MCP"""
-from . import McpServer
+from . import mcp_server
 import asyncio
 import warnings
 import tracemalloc
@@ -30,6 +30,6 @@ def main():
         raise
 
 # package level 에서 중요한 items 를 미리 보여줌
-__all__ = ['main', 'McpServer']
+__all__ = ['main', 'mcp_server.py']
 
 
