@@ -50,9 +50,54 @@ def require_discord_client():
     return wrapper
 
 async def list_tools() -> List[Tool]:
-    pass
-
-
+    Tool(
+        name="get_server_info",
+        description="Get information about a Discord server",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "server_id": {
+                    "type": "string",
+                    "description": "Discord server (guild) ID"
+                }
+            },
+            "required": ["server_id"]
+        }
+    ),
+    Tool(
+        name="read_messages",
+        description="Read recent messages from a channel",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "channel_id": {
+                    "type": "string",
+                    "description": "Discord channel ID"
+                },
+                "limit": {
+                    "type": "number",
+                    "description": "Number of messages to fetch (max 100)",
+                    "minimum": 1,
+                    "maximum": 100
+                }
+            },
+            "required": ["channel_id"]
+        }
+    ),
+    Tool(
+        name="get_user_info",
+        description="Get information about a Discord user",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "string",
+                    "description": "Discord user ID"
+                }
+            },
+            "required": ["user_id"]
+        }
+    ),
 async def call_tools(name: str, arg: Any) -> List[TextContent]:
     pass
 
