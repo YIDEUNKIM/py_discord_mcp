@@ -41,7 +41,7 @@ async def ready():
     discord_client = bot
     logger.info(f"Log as {bot.user.name}")
 
-def require_discord_client():
+def require_discord_client(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
         if not discord_client:
