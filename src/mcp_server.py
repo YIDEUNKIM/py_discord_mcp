@@ -70,6 +70,10 @@ async def list_tools() -> List[Tool]:
         inputSchema={
             "type": "object",
             "properties": {
+                ##"server": {
+                  ##  "type": "string",
+                    ##"description": 'Server name or ID (optional if bot is only in one server)',
+                ##},
                 "channel_id": {
                     "type": "string",
                     "description": "Discord channel ID"
