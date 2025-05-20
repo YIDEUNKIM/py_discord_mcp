@@ -191,7 +191,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         )]
 
 
-def main():
+async def main():
     asyncio.create_task(bot.start(DISCORD_TOKEN))
     async with stdio_server() as (read_stream, write_stream):
         await app.run(
