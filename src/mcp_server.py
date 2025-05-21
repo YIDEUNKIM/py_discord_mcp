@@ -29,7 +29,7 @@ if not DISCORD_TOKEN:
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = commands.Bot(commands_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 app = Server("discord_server")
 discord_client = None
