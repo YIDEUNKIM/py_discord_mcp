@@ -10,6 +10,7 @@
 ㄴ 📂 pyproject.toml
 ㄴ 📂 uv.lock
 ```
+
 ```bash
 # Clone the repository
 git clone https://github.com/YIDEUNKIM/py_discord_mcp
@@ -22,8 +23,6 @@ uv venv
 # Install the package
 uv pip install -e .
 ```
-
-
 
 
 ### git PR / commit
