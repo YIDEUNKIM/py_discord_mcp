@@ -103,6 +103,27 @@ async def list_tools() -> List[Tool]:
             "required": ["user_id"]
         }
     ),
+    Tool(
+        name="relationship_analysis",
+        description="Analyze relationships between users in a Discord channel",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "channel_id": {
+                    "type": "string",
+                    "description": "Discord channel ID"
+                },
+                "limit": {
+                    "type": "number",
+                    "description": "Number of messages to analyze (max 100)",
+                    "minimum": 1,
+                    "maximum": 100
+                }
+            },
+            "required": ["channel_id"]
+        }
+
+    )
     ]
 
 @app.call_tool()
@@ -197,6 +218,50 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                  f"Bot: {user_info['bot']}\n" +
                  f"Created: {user_info['created_at']}"
         )]
+    
+    elif name == "relationship_analysis":
+        
+        channel = await discord_client.fetch_channel(int(arguments["channel_id"]))
+        
+        limit = min(int(arguments.get("limit", 10)), 100)
+
+        messages = []
+
+        async for message in channel.history(limit=limit):
+            reaction_data = []
+
+            for reaction in message.reactions:
+                emoji_str = str(reaction.emoji.name) if hasattr(reaction.emoji, 'name') and reaction.emoji.name \
+                    else str(reaction.emoji.id) if hasattr(reaction.emoji, 'id') else str(reaction.emoji)
+
+                reaction_data.append({
+                    "emoji": emoji_str,
+                    "count": reaction.count
+                })
+
+            messages.append({
+                "author": str(message.author),
+                "author_id": str(message.author.id),
+                "content": message.content,
+                "mentions": [str(u.id) for u in message.mentions], # List of mentioned user IDs — used to detect direct interactions between users
+                "timestamp": message.created_at.isoformat(),
+                "is_reply": bool(message.reference), # Used in relationship analysis to detect reply-based interactions
+                "reactions": reaction_data 
+            })
+
+        messages.sort(key=lambda m: m["timestamp"])
+
+        return [TextContent( 
+            ## TODO: Dummy result for now. Replace this with actual LLM analysis later.
+            type="text",
+            text="Relationship Analysis:\n"
+            #Dummy result data
+                 "-'A'와 'B'는 서로 의지하며 신뢰하는 관계입니다. \n"
+                 "-'A'와 'C'는 종종 대립하나 서로 존중하는 관계입니다.\n"
+                 "-'B'와 'C'는 서로 편하게 대하며 친밀한 관계입니다."
+        )]
+
+
 
 
 async def main():
