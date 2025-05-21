@@ -262,15 +262,13 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         )]
 
 
-
-
 async def main():
     asyncio.create_task(bot.start(DISCORD_TOKEN))
     async with stdio_server() as (read_stream, write_stream):
         await app.run(
             read_stream,
             write_stream,
-            app.create_initializtion_option()
+            app.create_initialization_options()
         )
 
 if __name__ == "__main__":
