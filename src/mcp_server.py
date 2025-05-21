@@ -251,6 +251,15 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
 
         messages.sort(key=lambda m: m["timestamp"])
 
+        return [TextContent(
+            type="text",
+            text="Relationship Analysis:\n"
+            #Dummy result data
+                 "-'A'와 'B'는 서로 의지하며 신뢰하는 관계입니다. \n"
+                 "-'A'와 'C'는 종종 대립하나 서로 존중하는 관계입니다.\n"
+                 "-'B'와 'C'는 서로 편하게 대하며 친밀한 관계입니다."
+        )]
+
 
 
 
