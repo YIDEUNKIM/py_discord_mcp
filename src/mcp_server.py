@@ -226,16 +226,27 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         limit = min(int(arguments.get("limit", 10)), 100)
 
         messages = []
-        
+
         async for message in channel.history(limit=limit):
-            
+            reaction_data = []
+
+            for reaction in message.reactions:
+                emoji_str = str(reaction.emoji.name) if hasattr(reaction.emoji, 'name') and reaction.emoji.name \
+                    else str(reaction.emoji.id) if hasattr(reaction.emoji, 'id') else str(reaction.emoji)
+
+                reaction_data.append({
+                    "emoji": emoji_str,
+                    "count": reaction.count
+                })
+
             messages.append({
                 "author": str(message.author),
                 "author_id": str(message.author.id),
                 "content": message.content,
                 "mentions": [str(u.id) for u in message.mentions],
                 "timestamp": message.created_at.isoformat(),
-                "is_reply": bool(message.reference)
+                "is_reply": bool(message.reference),
+                "reactions": reaction_data
             })
 
         messages.sort(key=lambda m: m["timestamp"])
