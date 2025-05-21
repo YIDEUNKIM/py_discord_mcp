@@ -238,6 +238,9 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "is_reply": bool(message.reference)
             })
 
+        messages.sort(key=lambda m: m["timestamp"])
+
+
 
 
 async def main():
