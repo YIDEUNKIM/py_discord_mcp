@@ -16,4 +16,4 @@ build-backend = "hatchling.build"
 packages = ["src"]
 
 [project.scripts]
-discord-mcp = "discord_mcp:main"
+discord-mcp = "src:main"
