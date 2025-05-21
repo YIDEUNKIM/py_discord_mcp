@@ -243,15 +243,16 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "author": str(message.author),
                 "author_id": str(message.author.id),
                 "content": message.content,
-                "mentions": [str(u.id) for u in message.mentions],
+                "mentions": [str(u.id) for u in message.mentions], # List of mentioned user IDs — used to detect direct interactions between users
                 "timestamp": message.created_at.isoformat(),
-                "is_reply": bool(message.reference),
-                "reactions": reaction_data
+                "is_reply": bool(message.reference), # Used in relationship analysis to detect reply-based interactions
+                "reactions": reaction_data 
             })
 
         messages.sort(key=lambda m: m["timestamp"])
 
-        return [TextContent(
+        return [TextContent( 
+            ## TODO: Dummy result for now. Replace this with actual LLM analysis later.
             type="text",
             text="Relationship Analysis:\n"
             #Dummy result data
