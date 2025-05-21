@@ -3,11 +3,11 @@ name = "mcp-discord"
 version = "0.1.0"
 description = "Discord integration for Model Context Protocol"
 authors = [
-    {name = "Hanweg Altimer", email = "hanwegaltimer@outlook.com"},
+    {name = "YIDEUNKIM", email = "rladlems1031@gmail.com"},
 ]
 dependencies = [
     "discord.py>=2.3.0",
-    "mcp>=0.1.0",
+    "mcp>=1.0.0",  # 최신 버전 사용
 ]
 requires-python = ">=3.10"
 readme = "README.md"
