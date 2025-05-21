@@ -218,6 +218,26 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                  f"Bot: {user_info['bot']}\n" +
                  f"Created: {user_info['created_at']}"
         )]
+    
+    elif name == "relationship_analysis":
+        
+        channel = await discord_client.fetch_channel(int(arguments["channel_id"]))
+        
+        limit = min(int(arguments.get("limit", 10)), 100)
+
+        messages = []
+        
+        async for message in channel.history(limit=limit):
+            
+            messages.append({
+                "author": str(message.author),
+                "author_id": str(message.author.id),
+                "content": message.content,
+                "mentions": [str(u.id) for u in message.mentions],
+                "timestamp": message.created_at.isoformat(),
+                "is_reply": bool(message.reference)
+            })
+
 
 
 async def main():
