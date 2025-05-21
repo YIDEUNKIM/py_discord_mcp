@@ -7,7 +7,7 @@ authors = [
 ]
 dependencies = [
     "discord.py>=2.3.0",
-    "mcp>=1.0.0",  # 최신 버전 사용
+    "mcp>=1.0.0", # resent version
 ]
 requires-python = ">=3.10"
 readme = "README.md"
