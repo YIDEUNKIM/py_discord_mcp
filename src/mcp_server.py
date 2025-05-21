@@ -103,6 +103,27 @@ async def list_tools() -> List[Tool]:
             "required": ["user_id"]
         }
     ),
+    Tool(
+        name="relationship_analysis",
+        description="Analyze relationships between users in a Discord channel",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "channel_id": {
+                    "type": "string",
+                    "description": "Discord channel ID"
+                },
+                "limit": {
+                    "type": "number",
+                    "description": "Number of messages to analyze (max 100)",
+                    "minimum": 1,
+                    "maximum": 100
+                }
+            },
+            "required": ["channel_id"]
+        }
+
+    )
     ]
 
 @app.call_tool()
