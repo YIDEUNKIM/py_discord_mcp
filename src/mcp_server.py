@@ -36,7 +36,7 @@ discord_client = None
 ##################################################
 
 @bot.event
-async def ready():
+async def on_ready():
     global discord_client
     discord_client = bot
     logger.info(f"Log as {bot.user.name}")
@@ -50,6 +50,7 @@ def require_discord_client(func):
     return wrapper
 
 async def list_tools() -> List[Tool]:
+    return[
     Tool(
         name="get_server_info",
         description="Get information about a Discord server",
@@ -102,6 +103,10 @@ async def list_tools() -> List[Tool]:
             "required": ["user_id"]
         }
     ),
+    ]
+
+@app.call_tool()
+@require_discord_client
 async def call_tools(name: str, arguments: Any) -> List[TextContent]:
 
     if name == "get_server_info":
@@ -161,7 +166,6 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         # Helper function to format reactions
 
         def format_reaction(r):
-
             return f"{r['emoji']}({r['count']})"
 
         return [TextContent(
