@@ -16,9 +16,14 @@
 git clone https://github.com/YIDEUNKIM/py_discord_mcp
 cd py_discord_mcp
 
-# Create and activate virtual environment
+# Create and activate virtual environment (Windows)
 uv venv
 .venv\Scripts\activate
+
+#Create and activate virtual environment (Linux, macOS)
+uv venv
+source .venv\bin\activate
+
 
 # Install the package
 uv pip install -e .
