@@ -37,7 +37,7 @@ discord_client = None
 
 @bot.event
 async def ready():
-    global dicord_client
+    global discord_client
     discord_client = bot
     logger.info(f"Log as {bot.user.name}")
 
