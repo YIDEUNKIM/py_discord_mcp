@@ -28,6 +28,22 @@ source .venv\bin\activate
 # Install the package
 uv pip install -e .
 ```
+```bash
+"discord": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "C:\\Users\\User\\py_discord_mcp",
+        "run",
+        "mcp-discord"
+      ],
+      "env": {
+        "DISCORD_TOKEN": "your_discord_bot_TOKEN"
+      }
+    }
+```
+
+
 
 
 ### git PR / commit
