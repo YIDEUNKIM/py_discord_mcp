@@ -3,7 +3,7 @@
 ## Advanced Python Programming Team Project
 
 ```bash
-ㄴ 📂 src
+ㄴ 📂 src/discord_mcp
    ㄴ 📂 __init__.py
    ㄴ 📂 mcp_server
 ㄴ 📂 Dockerfile
