@@ -24,7 +24,7 @@ uv venv
 #Create and activate virtual environment (Linux, macOS)
 pip install uv
 uv venv
-source .venv\bin\activate
+source .venv/bin/activate
 
 
 # Install the package
