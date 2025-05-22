@@ -28,12 +28,13 @@ source .venv\bin\activate
 # Install the package
 uv pip install -e .
 ```
+Add this json format in claude_desktop_config.json
 ```bash
-"discord": {
+"discord-anlysis": {
       "command": "uv",
       "args": [
         "--directory",
-        "C:\\Users\\User\\py_discord_mcp",
+        "C:\\PATH\\PATH\\py_discord_mcp",
         "run",
         "mcp-discord"
       ],
