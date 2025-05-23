@@ -1,10 +1,7 @@
-"""
-import external library
-"""
 import asyncio
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from functools import wraps
 
@@ -14,18 +11,13 @@ from mcp.server import Server
 from mcp.types import Tool, TextContent, EmptyResult
 from mcp.server.stdio import stdio_server
 ##################################################
-"""
-Initial Constructor
-"""
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("discord_mcp_server")
 
-#Discord bot setup
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 if not DISCORD_TOKEN:
     raise ValueError("DISCORD_TOKEN environment variable is required")
 
-# Initialize Discord bot with necessary intents
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -34,6 +26,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 app = Server("discord_server")
 discord_client = None
 ##################################################
+
+last_seen: Dict[str, datetime] = {}
 
 @bot.event
 async def on_ready():
@@ -71,10 +65,6 @@ async def list_tools() -> List[Tool]:
         inputSchema={
             "type": "object",
             "properties": {
-                ##"server": {
-                  ##  "type": "string",
-                    ##"description": 'Server name or ID (optional if bot is only in one server)',
-                ##},
                 "channel_id": {
                     "type": "string",
                     "description": "Discord channel ID"
@@ -154,7 +144,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
 
         limit = min(int(arguments.get("limit", 10)), 100)
 
-        fetch_users = arguments.get("fetch_reaction_users", False)  # Only fetch users if explicitly requested
+        fetch_users = arguments.get("fetch_reaction_users", False)
 
         messages = []
 
@@ -181,10 +171,8 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "author": str(message.author),
                 "content": message.content,
                 "timestamp": message.created_at.isoformat(),
-                "reactions": reaction_data  # Add reactions to message dict
+                "reactions": reaction_data
             })
-
-        # Helper function to format reactions
 
         def format_reaction(r):
             return f"{r['emoji']}({r['count']})"
@@ -243,24 +231,83 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "author": str(message.author),
                 "author_id": str(message.author.id),
                 "content": message.content,
-                "mentions": [str(u.id) for u in message.mentions], # List of mentioned user IDs — used to detect direct interactions between users
+                "mentions": [str(u.id) for u in message.mentions],
                 "timestamp": message.created_at.isoformat(),
-                "is_reply": bool(message.reference), # Used in relationship analysis to detect reply-based interactions
+                "is_reply": bool(message.reference),
                 "reactions": reaction_data 
             })
 
         messages.sort(key=lambda m: m["timestamp"])
 
         return [TextContent( 
-            ## TODO: Dummy result for now. Replace this with actual LLM analysis later.
             type="text",
             text="Relationship Analysis:\n"
-            #Dummy result data
                  "-'A'와 'B'는 서로 의지하며 신뢰하는 관계입니다. \n"
                  "-'A'와 'C'는 종종 대립하나 서로 존중하는 관계입니다.\n"
                  "-'B'와 'C'는 서로 편하게 대하며 친밀한 관계입니다."
         )]
 
+@bot.event
+async def on_member_update(before, after):
+    if before.status != discord.Status.online and after.status == discord.Status.online:
+        user_id = str(after.id)
+        now = datetime.utcnow()
+        last_seen_time = last_seen.get(user_id, None)
+        if last_seen_time is None or (now - last_seen_time) >= timedelta(days=7):
+            summary_text = await generate_server_summary(after.guild, since=last_seen_time)
+            try:
+                await after.send(f"Welcome back! Here is a summary of what's happened on the server recently:\n\n{summary_text}")
+            except Exception as e:
+                logger.warning(f"Failed to send DM: {e}")
+        last_seen[user_id] = now
+
+async def generate_server_summary(guild, since=None):
+    cutoff = since or (datetime.utcnow() - timedelta(days=7))
+    member_change_info = "Recent member join/leave activity can be checked in the log channel.\n"
+    channel = discord.utils.get(guild.text_channels, name="general")
+    topics_preview = ""
+    if channel:
+        messages = []
+        async for msg in channel.history(limit=50, after=cutoff):
+            messages.append(msg.content)
+        if messages:
+            sample_text = "\n".join(messages[-20:])
+            topics_preview = f"Recent conversations (partial):\n{sample_text[:500]}...\n"
+        else:
+            topics_preview = "Not much recent conversation.\n"
+    else:
+        topics_preview = "Could not find the 'general' channel.\n"
+    notice_text = ""
+    rules_channel = discord.utils.get(guild.text_channels, name="rules")
+    if rules_channel:
+        notices = []
+        async for msg in rules_channel.history(limit=5, after=cutoff):
+            notices.append(msg.content)
+        if notices:
+            notice_text = "Recent announcements/rule changes:\n" + "\n---\n".join(notices)
+        else:
+            notice_text = "No recent announcements or rule changes."
+    else:
+        notice_text = "Could not find the announcements/rules channel."
+    schedule_info = ""
+    sched_channel = discord.utils.get(guild.text_channels, name="calendar")
+    if sched_channel:
+        schedule_msgs = []
+        async for msg in sched_channel.history(limit=5, after=cutoff):
+            schedule_msgs.append(msg.content)
+        if schedule_msgs:
+            schedule_info = "Recent schedules:\n" + "\n".join(schedule_msgs)
+        else:
+            schedule_info = "No recent schedules."
+    else:
+        schedule_info = "No schedule channel."
+    summary = (
+        f"[Member activity]\n{member_change_info}\n"
+        f"[Recent hot topics]\n{topics_preview}\n"
+        f"[Announcements/Rules]\n{notice_text}\n\n"
+        f"[Major Schedules]\n{schedule_info}\n"
+    )
+    return summary
 
 async def main():
     asyncio.create_task(bot.start(DISCORD_TOKEN))
