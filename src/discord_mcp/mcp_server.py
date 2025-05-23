@@ -278,7 +278,7 @@ async def generate_server_summary(guild, since=None):
     else:
         topics_preview = "Could not find the 'general' channel.\n"
     notice_text = ""
-    rules_channel = discord.utils.get(guild.text_channels, name="공지") or discord.utils.get(guild.text_channels, name="rules")
+    rules_channel = discord.utils.get(guild.text_channels, name="rules")
     if rules_channel:
         notices = []
         async for msg in rules_channel.history(limit=5, after=cutoff):
@@ -290,7 +290,7 @@ async def generate_server_summary(guild, since=None):
     else:
         notice_text = "Could not find the announcements/rules channel."
     schedule_info = ""
-    sched_channel = discord.utils.get(guild.text_channels, name="일정") or discord.utils.get(guild.text_channels, name="calendar")
+    sched_channel = discord.utils.get(guild.text_channels, name="calendar")
     if sched_channel:
         schedule_msgs = []
         async for msg in sched_channel.history(limit=5, after=cutoff):
