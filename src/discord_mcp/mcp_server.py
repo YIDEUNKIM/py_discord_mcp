@@ -1,7 +1,7 @@
 import asyncio
 import os
 import logging
-from datetime import datetime, timedelta   # [수정/추가] timedelta 추가
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from functools import wraps
 
@@ -27,8 +27,7 @@ app = Server("discord_server")
 discord_client = None
 ##################################################
 
-# [추가] 복귀 유저 감지를 위한 마지막 접속 기록 저장 변수
-last_seen: Dict[str, datetime] = {}  # 유저별 마지막 접속 시간
+last_seen: Dict[str, datetime] = {}
 
 @bot.event
 async def on_ready():
@@ -145,7 +144,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
 
         limit = min(int(arguments.get("limit", 10)), 100)
 
-        fetch_users = arguments.get("fetch_reaction_users", False)  # Only fetch users if explicitly requested
+        fetch_users = arguments.get("fetch_reaction_users", False)
 
         messages = []
 
@@ -172,10 +171,8 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "author": str(message.author),
                 "content": message.content,
                 "timestamp": message.created_at.isoformat(),
-                "reactions": reaction_data  # Add reactions to message dict
+                "reactions": reaction_data
             })
-
-        # Helper function to format reactions
 
         def format_reaction(r):
             return f"{r['emoji']}({r['count']})"
@@ -234,45 +231,39 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "author": str(message.author),
                 "author_id": str(message.author.id),
                 "content": message.content,
-                "mentions": [str(u.id) for u in message.mentions], # List of mentioned user IDs — used to detect direct interactions between users
+                "mentions": [str(u.id) for u in message.mentions],
                 "timestamp": message.created_at.isoformat(),
-                "is_reply": bool(message.reference), # Used in relationship analysis to detect reply-based interactions
+                "is_reply": bool(message.reference),
                 "reactions": reaction_data 
             })
 
         messages.sort(key=lambda m: m["timestamp"])
 
         return [TextContent( 
-            ## TODO: Dummy result for now. Replace this with actual LLM analysis later.
             type="text",
             text="Relationship Analysis:\n"
-            #Dummy result data
                  "-'A'와 'B'는 서로 의지하며 신뢰하는 관계입니다. \n"
                  "-'A'와 'C'는 종종 대립하나 서로 존중하는 관계입니다.\n"
                  "-'B'와 'C'는 서로 편하게 대하며 친밀한 관계입니다."
         )]
 
-# [추가] 복귀 유저 감지 및 서버 요약 DM 전송 기능
 @bot.event
 async def on_member_update(before, after):
-    # 유저가 offline → online 등으로 상태가 바뀌는 순간만 처리
     if before.status != discord.Status.online and after.status == discord.Status.online:
         user_id = str(after.id)
         now = datetime.utcnow()
         last_seen_time = last_seen.get(user_id, None)
-        # 7일 이상 미접속 시에만 동작
         if last_seen_time is None or (now - last_seen_time) >= timedelta(days=7):
             summary_text = await generate_server_summary(after.guild, since=last_seen_time)
             try:
-                await after.send(f"오랜만이에요! 최근 서버 요약입니다:\n\n{summary_text}")
+                await after.send(f"Welcome back! Here is a summary of what's happened on the server recently:\n\n{summary_text}")
             except Exception as e:
-                logger.warning(f"DM 전송 실패: {e}")
-        last_seen[user_id] = now  # 마지막 접속 시간 갱신
+                logger.warning(f"Failed to send DM: {e}")
+        last_seen[user_id] = now
 
-# [추가] 서버 요약 정보 생성 함수
 async def generate_server_summary(guild, since=None):
     cutoff = since or (datetime.utcnow() - timedelta(days=7))
-    member_change_info = "최근 멤버 입장/탈퇴 내역은 별도 로그 채널에서 확인하세요.\n"
+    member_change_info = "Recent member join/leave activity can be checked in the log channel.\n"
     channel = discord.utils.get(guild.text_channels, name="general")
     topics_preview = ""
     if channel:
@@ -281,11 +272,11 @@ async def generate_server_summary(guild, since=None):
             messages.append(msg.content)
         if messages:
             sample_text = "\n".join(messages[-20:])
-            topics_preview = f"최근 대화(일부):\n{sample_text[:500]}...\n"
+            topics_preview = f"Recent conversations (partial):\n{sample_text[:500]}...\n"
         else:
-            topics_preview = "최근 대화가 많지 않아요.\n"
+            topics_preview = "Not much recent conversation.\n"
     else:
-        topics_preview = "'general' 채널을 찾을 수 없습니다.\n"
+        topics_preview = "Could not find the 'general' channel.\n"
     notice_text = ""
     rules_channel = discord.utils.get(guild.text_channels, name="공지") or discord.utils.get(guild.text_channels, name="rules")
     if rules_channel:
@@ -293,11 +284,11 @@ async def generate_server_summary(guild, since=None):
         async for msg in rules_channel.history(limit=5, after=cutoff):
             notices.append(msg.content)
         if notices:
-            notice_text = "최근 공지/규칙 변경:\n" + "\n---\n".join(notices)
+            notice_text = "Recent announcements/rule changes:\n" + "\n---\n".join(notices)
         else:
-            notice_text = "최근 공지/규칙 변경 없음"
+            notice_text = "No recent announcements or rule changes."
     else:
-        notice_text = "공지/규칙 채널을 찾을 수 없음"
+        notice_text = "Could not find the announcements/rules channel."
     schedule_info = ""
     sched_channel = discord.utils.get(guild.text_channels, name="일정") or discord.utils.get(guild.text_channels, name="calendar")
     if sched_channel:
@@ -305,16 +296,16 @@ async def generate_server_summary(guild, since=None):
         async for msg in sched_channel.history(limit=5, after=cutoff):
             schedule_msgs.append(msg.content)
         if schedule_msgs:
-            schedule_info = "최근 일정:\n" + "\n".join(schedule_msgs)
+            schedule_info = "Recent schedules:\n" + "\n".join(schedule_msgs)
         else:
-            schedule_info = "최근 등록된 일정 없음"
+            schedule_info = "No recent schedules."
     else:
-        schedule_info = "일정 채널 없음"
+        schedule_info = "No schedule channel."
     summary = (
-        f"[멤버 출입 변화]\n{member_change_info}\n"
-        f"[최근 인기 대화]\n{topics_preview}\n"
-        f"[공지/규칙]\n{notice_text}\n\n"
-        f"[주요 일정]\n{schedule_info}\n"
+        f"[Member activity]\n{member_change_info}\n"
+        f"[Recent hot topics]\n{topics_preview}\n"
+        f"[Announcements/Rules]\n{notice_text}\n\n"
+        f"[Major Schedules]\n{schedule_info}\n"
     )
     return summary
 
