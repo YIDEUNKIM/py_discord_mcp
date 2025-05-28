@@ -1,0 +1,5 @@
+name: py-discord-mcp
+description: An MCP server for Discord analysis using LLMs
+entrypoint: uv run mcp-discord
+env:
+  DISCORD_TOKEN: ${DISCORD_TOKEN}
