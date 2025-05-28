@@ -220,10 +220,12 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         )]
     
     elif name == "relationship_analysis":
-        
+
         channel = await discord_client.fetch_channel(int(arguments["channel_id"]))
         
         limit = min(int(arguments.get("limit", 10)), 100)
+
+        fetch_users = arguments.get("fetch_users", False)
 
         messages = []
 
@@ -234,31 +236,45 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 emoji_str = str(reaction.emoji.name) if hasattr(reaction.emoji, 'name') and reaction.emoji.name \
                     else str(reaction.emoji.id) if hasattr(reaction.emoji, 'id') else str(reaction.emoji)
 
+                users = []
+                if fetch_users:
+                    try:
+                        users = [f"{user.name}#{user.discriminator}" for user in await reaction.users().flatten()]
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch reaction users for emoji {emoji_str}: {e}")
+
                 reaction_data.append({
                     "emoji": emoji_str,
-                    "count": reaction.count
+                    "count": reaction.count,
+                    "users": users
                 })
 
             messages.append({
                 "author": str(message.author),
                 "author_id": str(message.author.id),
                 "content": message.content,
-                "mentions": [str(u.id) for u in message.mentions], # List of mentioned user IDs — used to detect direct interactions between users
+                "mentions": [str(u.id) for u in message.mentions],
                 "timestamp": message.created_at.isoformat(),
-                "is_reply": bool(message.reference), # Used in relationship analysis to detect reply-based interactions
-                "reactions": reaction_data 
+                "is_reply": bool(message.reference),
+                "reactions": reaction_data
             })
 
         messages.sort(key=lambda m: m["timestamp"])
 
+        def format_reaction(r):
+            if r["users"]:
+                return f"{r['emoji']}({r['count']}): {', '.join(r['users'])}"
+            else:
+                return f"{r['emoji']}({r['count']})"
+
+        summary_text = "Relationship Analysis:\n\n"
+        for m in messages:
+            summary_text += (
+                f"{m['author']} ({m['timestamp']}): {m['content']}\n"
+                f"Reactions: {', '.join([format_reaction(r) for r in m['reactions']]) if m['reactions'] else 'No reactions'}\n\n"
+            )
+
         return [TextContent( 
-            ## TODO: Dummy result for now. Replace this with actual LLM analysis later.
-            type="text",
-            text="Relationship Analysis:\n"
-            #Dummy result data
-                 "-'A'와 'B'는 서로 의지하며 신뢰하는 관계입니다. \n"
-                 "-'A'와 'C'는 종종 대립하나 서로 존중하는 관계입니다.\n"
-                 "-'B'와 'C'는 서로 편하게 대하며 친밀한 관계입니다."
         )]
 
 
