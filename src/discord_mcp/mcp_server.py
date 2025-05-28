@@ -8,6 +8,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from functools import wraps
 
+from itertools import combinations
+from collections import defaultdict
+
 import discord
 from discord.ext import commands
 from mcp.server import Server
@@ -267,15 +270,64 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
             else:
                 return f"{r['emoji']}({r['count']})"
 
-        summary_text = "Relationship Analysis:\n\n"
+        summary_text = "Message Summary:\n\n"
         for m in messages:
             summary_text += (
                 f"{m['author']} ({m['timestamp']}): {m['content']}\n"
                 f"Reactions: {', '.join([format_reaction(r) for r in m['reactions']]) if m['reactions'] else 'No reactions'}\n\n"
             )
 
-        return [TextContent( 
-        )]
+        user_ids = {msg["author_id"]: msg["author"] for msg in messages}
+        interaction_counts = defaultdict(lambda: {"mentions": 0, "replies": 0, "reactions": 0})
+
+        for msg in messages:
+            sender = msg["author"]
+            mentions = msg["mentions"]
+            is_reply = msg["is_reply"]
+            for mentioned_id in mentions:
+                mentioned_name = user_ids.get(mentioned_id)
+                if mentioned_name and mentioned_name != sender:
+                    pair = tuple(sorted([sender, mentioned_name]))
+                    interaction_counts[pair]["mentions"] += 1
+            if is_reply:
+                for other in user_ids.values():
+                    if other != sender:
+                        pair = tuple(sorted([sender, other]))
+                        interaction_counts[pair]["replies"] += 1
+            for other in user_ids.values():
+                if other != sender:
+                    pair = tuple(sorted([sender, other]))
+                    interaction_counts[pair]["reactions"] += sum(r["count"] for r in msg["reactions"])
+
+        def generate_description(pair, stats):
+            total = stats["mentions"] + stats["replies"] + stats["reactions"]
+            if total == 0:
+                return f"{pair[0]} <-> {pair[1]}: No significant interaction observed."
+            parts = []
+            if stats["mentions"]:
+                parts.append("mentions")
+            if stats["replies"]:
+                parts.append("replies")
+            if stats["reactions"]:
+                parts.append("reactions")
+            return f"{pair[0]} <-> {pair[1]}: Interaction via {', '.join(parts)}."
+
+        relationship_descriptions = [
+            generate_description(pair, stats)
+            for pair, stats in interaction_counts.items()
+        ]
+
+        relationship_report = "Pairwise Relationship Estimates:\n" + "\n".join(relationship_descriptions)
+
+        full_output = (
+            "Relationship Analysis Report\n"
+            "=============================\n\n"
+            f"Total messages analyzed: {len(messages)}\n\n"
+            f"{summary_text}\n"
+            f"{relationship_report}"
+        )
+
+        return [TextContent(type="text", text=full_output)]
 
 
 async def main():
