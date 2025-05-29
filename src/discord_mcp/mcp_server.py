@@ -112,6 +112,10 @@ async def list_tools() -> List[Tool]:
         inputSchema={
             "type": "object",
             "properties": {
+                ## "server": {
+                    ##     "type": "string",
+                        ## "description": "Server name or ID (optional if bot is only in one server)"
+                ## },
                 "channel_id": {
                     "type": "string",
                     "description": "Discord channel ID"
@@ -240,7 +244,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                     else str(reaction.emoji.id) if hasattr(reaction.emoji, 'id') else str(reaction.emoji)
 
                 users = []
-                if fetch_users:
+                if fetch_users: # Optionally fetch usernames of users who reacted
                     try:
                         users = [f"{user.name}#{user.discriminator}" for user in await reaction.users().flatten()]
                     except Exception as e:
@@ -256,15 +260,15 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "author": str(message.author),
                 "author_id": str(message.author.id),
                 "content": message.content,
-                "mentions": [str(u.id) for u in message.mentions],
+                "mentions": [str(u.id) for u in message.mentions], # List of mentioned user IDs — used to detect direct interactions between users
                 "timestamp": message.created_at.isoformat(),
-                "is_reply": bool(message.reference),
+                "is_reply": bool(message.reference), # Used in relationship analysis to detect reply-based interactions
                 "reactions": reaction_data
             })
 
         messages.sort(key=lambda m: m["timestamp"])
 
-        def format_reaction(r):
+        def format_reaction(r): # Generate a text summary of all messages with formatted reactions
             if r["users"]:
                 return f"{r['emoji']}({r['count']}): {', '.join(r['users'])}"
             else:
@@ -279,6 +283,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
 
         user_ids = {msg["author_id"]: msg["author"] for msg in messages}
         interaction_counts = defaultdict(lambda: {"mentions": 0, "replies": 0, "reactions": 0})
+        # Track interaction counts (mentions, replies, reactions) between each user pair
 
         for msg in messages:
             sender = msg["author"]
@@ -300,6 +305,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                     interaction_counts[pair]["reactions"] += sum(r["count"] for r in msg["reactions"])
 
         def generate_description(pair, stats):
+            # Generate a summary of interaction types between user pairs
             total = stats["mentions"] + stats["replies"] + stats["reactions"]
             if total == 0:
                 return f"{pair[0]} <-> {pair[1]}: No significant interaction observed."
@@ -320,6 +326,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         relationship_report = "Pairwise Relationship Estimates:\n" + "\n".join(relationship_descriptions)
 
         full_output = (
+            # Construct the final analysis output including summary and relationship report
             "Relationship Analysis Report\n"
             "=============================\n\n"
             f"Total messages analyzed: {len(messages)}\n\n"
