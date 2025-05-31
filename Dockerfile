@@ -37,4 +37,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV DISCORD_TOKEN=your_bot_token
 
 # when running the container, add --db-path and a bind mount to the host's db file
-ENTRYPOINT ["discord-mcp"]
+ENTRYPOINT ["mcp-discord"]

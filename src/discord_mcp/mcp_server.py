@@ -8,6 +8,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from functools import wraps
 
+from itertools import combinations
+from collections import defaultdict
+
 import discord
 from discord.ext import commands
 from mcp.server import Server
@@ -109,6 +112,10 @@ async def list_tools() -> List[Tool]:
         inputSchema={
             "type": "object",
             "properties": {
+                ## "server": {
+                    ##     "type": "string",
+                        ## "description": "Server name or ID (optional if bot is only in one server)"
+                ## },
                 "channel_id": {
                     "type": "string",
                     "description": "Discord channel ID"
@@ -220,10 +227,12 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         )]
     
     elif name == "relationship_analysis":
-        
+
         channel = await discord_client.fetch_channel(int(arguments["channel_id"]))
         
         limit = min(int(arguments.get("limit", 10)), 100)
+
+        fetch_users = arguments.get("fetch_users", False)
 
         messages = []
 
@@ -234,9 +243,17 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 emoji_str = str(reaction.emoji.name) if hasattr(reaction.emoji, 'name') and reaction.emoji.name \
                     else str(reaction.emoji.id) if hasattr(reaction.emoji, 'id') else str(reaction.emoji)
 
+                users = []
+                if fetch_users: # Optionally fetch usernames of users who reacted
+                    try:
+                        users = [f"{user.name}#{user.discriminator}" for user in await reaction.users().flatten()]
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch reaction users for emoji {emoji_str}: {e}")
+
                 reaction_data.append({
                     "emoji": emoji_str,
-                    "count": reaction.count
+                    "count": reaction.count,
+                    "users": users
                 })
 
             messages.append({
@@ -246,20 +263,78 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "mentions": [str(u.id) for u in message.mentions], # List of mentioned user IDs — used to detect direct interactions between users
                 "timestamp": message.created_at.isoformat(),
                 "is_reply": bool(message.reference), # Used in relationship analysis to detect reply-based interactions
-                "reactions": reaction_data 
+                "reactions": reaction_data
             })
 
         messages.sort(key=lambda m: m["timestamp"])
 
-        return [TextContent( 
-            ## TODO: Dummy result for now. Replace this with actual LLM analysis later.
-            type="text",
-            text="Relationship Analysis:\n"
-            #Dummy result data
-                 "-'A'와 'B'는 서로 의지하며 신뢰하는 관계입니다. \n"
-                 "-'A'와 'C'는 종종 대립하나 서로 존중하는 관계입니다.\n"
-                 "-'B'와 'C'는 서로 편하게 대하며 친밀한 관계입니다."
-        )]
+        def format_reaction(r): # Generate a text summary of all messages with formatted reactions
+            if r["users"]:
+                return f"{r['emoji']}({r['count']}): {', '.join(r['users'])}"
+            else:
+                return f"{r['emoji']}({r['count']})"
+
+        summary_text = "Message Summary:\n\n"
+        for m in messages:
+            summary_text += (
+                f"{m['author']} ({m['timestamp']}): {m['content']}\n"
+                f"Reactions: {', '.join([format_reaction(r) for r in m['reactions']]) if m['reactions'] else 'No reactions'}\n\n"
+            )
+
+        user_ids = {msg["author_id"]: msg["author"] for msg in messages}
+        interaction_counts = defaultdict(lambda: {"mentions": 0, "replies": 0, "reactions": 0})
+        # Track interaction counts (mentions, replies, reactions) between each user pair
+
+        for msg in messages:
+            sender = msg["author"]
+            mentions = msg["mentions"]
+            is_reply = msg["is_reply"]
+            for mentioned_id in mentions:
+                mentioned_name = user_ids.get(mentioned_id)
+                if mentioned_name and mentioned_name != sender:
+                    pair = tuple(sorted([sender, mentioned_name]))
+                    interaction_counts[pair]["mentions"] += 1
+            if is_reply:
+                for other in user_ids.values():
+                    if other != sender:
+                        pair = tuple(sorted([sender, other]))
+                        interaction_counts[pair]["replies"] += 1
+            for other in user_ids.values():
+                if other != sender:
+                    pair = tuple(sorted([sender, other]))
+                    interaction_counts[pair]["reactions"] += sum(r["count"] for r in msg["reactions"])
+
+        def generate_description(pair, stats):
+            # Generate a summary of interaction types between user pairs
+            total = stats["mentions"] + stats["replies"] + stats["reactions"]
+            if total == 0:
+                return f"{pair[0]} <-> {pair[1]}: No significant interaction observed."
+            parts = []
+            if stats["mentions"]:
+                parts.append("mentions")
+            if stats["replies"]:
+                parts.append("replies")
+            if stats["reactions"]:
+                parts.append("reactions")
+            return f"{pair[0]} <-> {pair[1]}: Interaction via {', '.join(parts)}."
+
+        relationship_descriptions = [
+            generate_description(pair, stats)
+            for pair, stats in interaction_counts.items()
+        ]
+
+        relationship_report = "Pairwise Relationship Estimates:\n" + "\n".join(relationship_descriptions)
+
+        full_output = (
+            # Construct the final analysis output including summary and relationship report
+            "Relationship Analysis Report\n"
+            "=============================\n\n"
+            f"Total messages analyzed: {len(messages)}\n\n"
+            f"{summary_text}\n"
+            f"{relationship_report}"
+        )
+
+        return [TextContent(type="text", text=full_output)]
 
 
 async def main():
