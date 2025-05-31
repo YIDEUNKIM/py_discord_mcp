@@ -119,6 +119,7 @@ def require_discord_client(func):
     return wrapper
 
 # --- MCP Tool Definitions ---
+@app.list_tools()
 async def list_tools() -> List[Tool]:
     """Returns a list of tools available for the MCP server."""
     return [
@@ -620,7 +621,7 @@ async def main():
     # Start the MCP server using stdio
     # It will listen for tool calls from another process (e.g., an LLM agent controller)
     async with stdio_server() as (reader, writer):
-        initialization_options = app.create_initialization_options(await list_tools())
+        initialization_options = app.create_initialization_options()
         await app.run(reader, writer, initialization_options)
 
 if __name__ == "__main__":
