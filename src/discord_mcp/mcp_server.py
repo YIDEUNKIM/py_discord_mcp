@@ -34,6 +34,7 @@ if not DISCORD_TOKEN:
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 app = Server("discord_server")
@@ -82,8 +83,14 @@ async def _llm_summarize(text: str) -> str:
             app.request_tool("llm_summarize", {"text": text, "max_chars": SUMMARY_MAX_CHARS}),
             timeout=25,
         )
-        if res and res[0].type == "text":
-            return res[0].text[:SUMMARY_MAX_CHARS]
+        if res:
+            first = res[0]
+             # Claude → TextContent
+            if isinstance(first, TextContent) and first.type == "text":
+                return first.text[:SUMMARY_MAX_CHARS]
+            # Claude → raw string (fallback)
+            if isinstance(first, str):
+                return first[:SUMMARY_MAX_CHARS]
     except Exception as e:
         logger.warning(f"LLM summarize error: {e}")
     return text[:SUMMARY_MAX_CHARS]
@@ -205,7 +212,19 @@ async def list_tools() -> List[Tool]:
                 },
                 "required": ["channel_id"]
             }
-        )
+        ),
+        Tool(
+            name="llm_summarize",       # ★ new tool
+            description="Return ≤1000-char summary using Claude",
+            inputSchema={
+                "type": "object",
+                " properties": {
+                 "text": {"type": "string"},
+                 "max_chars": {"type": "number"},
+                },
+                "required": ["text"],
+            }
+        ),
     ]
     summarize_text_tool = Tool(
         name="summarize_text",
@@ -487,3 +506,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
