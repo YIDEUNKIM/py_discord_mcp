@@ -1,5 +1,5 @@
 """
-import external library
+Import all required libraries, both standard and external.
 """
 import asyncio
 import os
@@ -7,7 +7,6 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from functools import wraps
-
 from itertools import combinations
 from collections import defaultdict
 
@@ -19,42 +18,57 @@ from mcp.server.stdio import stdio_server
 import json
 
 ##################################################
-"""
-Initial Constructor
-"""
+# Initialization, Logging, and Discord/MCP Setup
+##################################################
+
+# Set up global logging for the whole service.
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("discord_mcp_server")
 
-# Discord bot setup
+# Get Discord bot token from environment for security reasons.
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 if not DISCORD_TOKEN:
     raise ValueError("DISCORD_TOKEN environment variable is required")
 
-# Initialize Discord bot with necessary intents
+# Initialize Discord bot with intent permissions.
+# message_content: To read messages; members/presences: To track member activity.
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# MCP server setup for tool-based communication.
 app = Server("discord_server")
+
+# Store Discord client object so it can be used in tool handlers.
 discord_client: Optional[commands.Bot] = None
+
+##################################################
+# File Storage, Constants, and Channel Category Helpers
 ##################################################
 
-# ─────────────────── CONSTANTS & FILE HELPERS ───────────────────
-LAST_SEEN_FILE        = "last_seen.json"
-INACTIVE_DAYS         = 7
-SUMMARY_MAX_CHARS     = 1000
+# Constants for saving last-seen times, defining inactivity, message limits.
+LAST_SEEN_FILE        = "last_seen.json"     # File path to store last seen times for users.
+INACTIVE_DAYS         = 7                    # Days before user is considered "inactive".
+SUMMARY_MAX_CHARS     = 1000                 # Max chars for the summary passed to LLM.
+
+# Message limits by category: notice/calendar/talk.
 NOTICE_LIMIT, CAL_LIMIT, TALK_LIMIT = 30, 30, 300
 
+# Channel categorization keywords.
 NOTICE_CH   = {"rules", "rule", "notice", "announcements"}
 CALENDAR_CH = {"calendar", "calender", "schedule"}
 TALK_CH     = {"general", "chat", "talk", "discussion"}
 
+# In-memory last_seen: maps user_id (str) -> ISO timestamp.
 last_seen: Dict[str, str] = {}
 
 def _load_last_seen():
-    """Load last seen data from JSON file."""
+    """
+    Loads last seen data from JSON file into memory.
+    Keeps track of user inactivity for the bot, across restarts.
+    """
     global last_seen
     if os.path.exists(LAST_SEEN_FILE):
         try:
@@ -64,40 +78,25 @@ def _load_last_seen():
             logger.warning(f"Failed to load {LAST_SEEN_FILE}: {e}")
 
 def _save_last_seen():
-    """Save last seen data to JSON file."""
+    """
+    Saves the current last_seen state to disk for persistence.
+    Protects against repeated notification of the same user.
+    """
     try:
         with open(LAST_SEEN_FILE, "w", encoding="utf-8") as f:
             json.dump(last_seen, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.warning(f"Failed to save {LAST_SEEN_FILE}: {e}")
 
-# ─────────────────── LLM WRAPPER ───────────────────
-async def _llm_summarize(text: str) -> str:
-    """
-    Call the external LLM summary tool (e.g., "llm_summarize") to get ≤1000 characters summary.
-    If timeout or error, fallback to the first 1000 characters.
-    """
-    try:
-        # Requests summary from an external tool connected to the MCP server
-        res = await asyncio.wait_for(
-            app.request_tool("llm_summarize", {"text": text, "max_chars": SUMMARY_MAX_CHARS}),
-            timeout=25,
-        )
-        if res:
-            first = res[0]
-             # Claude → TextContent
-            if isinstance(first, TextContent) and first.type == "text":
-                return first.text[:SUMMARY_MAX_CHARS]
-            # Claude → raw string (fallback)
-            if isinstance(first, str):
-                return first[:SUMMARY_MAX_CHARS]
-    except Exception as e:
-        logger.warning(f"LLM summarize error: {e}")
-    return text[:SUMMARY_MAX_CHARS]
+##################################################
+# Channel Categorization and Message Gathering
+##################################################
 
-# ─────────────────── MESSAGE GATHERING ───────────────────
 async def _categorize(ch: discord.TextChannel) -> Optional[str]:
-    """Categorize channel by its name."""
+    """
+    Categorizes a channel by its name using the predefined keyword sets.
+    Returns category name (notice/calendar/talk) or None if no match.
+    """
     n = ch.name.lower()
     if n in NOTICE_CH:   return "notice"
     if n in CALENDAR_CH: return "calendar"
@@ -106,34 +105,49 @@ async def _categorize(ch: discord.TextChannel) -> Optional[str]:
 
 async def _gather_messages(guild: discord.Guild) -> Dict[str, List[str]]:
     """
-    Gather latest messages from categorized channels in the guild.
-    Returns dictionary: {category: [messages]}
+    For the provided guild:
+    - Collects up to N most recent messages from each categorized channel.
+    - Returns a dictionary with keys "notice", "calendar", "talk", each mapping to a list of "Author: Content" strings.
+    - Reverses messages so that oldest come first, for easier summary context.
+    - Skips channels with missing permissions or other errors.
     """
     buckets = {"notice": [], "calendar": [], "talk": []}
     for ch in guild.text_channels:
         kind = await _categorize(ch)
-        if not kind: continue
+        if not kind:
+            continue
         limit = {"notice": NOTICE_LIMIT, "calendar": CAL_LIMIT, "talk": TALK_LIMIT}[kind]
         try:
             channel_messages = []
             async for msg in ch.history(limit=limit):
                 channel_messages.append(f"{msg.author.display_name}: {msg.content}")
-            buckets[kind].extend(reversed(channel_messages))  # Order: oldest first
+            # Reverse order to chronological for summarization
+            buckets[kind].extend(reversed(channel_messages))
         except Exception as e:
             logger.warning(f"History fetch fail for channel {ch.name}: {e}")
     return buckets
+
+##################################################
+# Discord Ready Event and Client Protection
 ##################################################
 
 @bot.event
 async def on_ready():
-    """Fires when the Discord bot is ready."""
+    """
+    Discord event: Fired once the bot is ready and fully connected.
+    - Stores the Discord client globally for use in tools.
+    - Loads last seen data for member inactivity tracking.
+    """
     global discord_client
     discord_client = bot
     logger.info(f"Log as {bot.user.name}")
-    _load_last_seen()  # Load last seen data at startup
+    _load_last_seen()  # Load state for inactivity logic
 
 def require_discord_client(func):
-    """Decorator to ensure the Discord client is ready before running the function."""
+    """
+    Decorator to prevent running commands/tools before the Discord client is initialized.
+    Used to make sure all tool calls wait for full bot readiness.
+    """
     @wraps(func)
     async def wrapper(*args, **kwargs):
         if not discord_client:
@@ -141,21 +155,25 @@ def require_discord_client(func):
         return await func(*args, **kwargs)
     return wrapper
 
+##################################################
+# MCP Tool Definitions and Main Tool Dispatcher
+##################################################
+
 @app.list_tools()
 async def list_tools() -> List[Tool]:
-    """Register all tools available via the MCP server."""
+    """
+    Registers all tools exposed to the MCP server.
+    These tools are available to be called by LLMs or other agents.
+    - Each Tool: name, description, and input schema (for validation)
+    - The summarize_text tool is used for gathering categorized messages for a given user.
+    """
     original_tools = [
         Tool(
             name="get_server_info",
             description="Get information about a Discord server",
             inputSchema={
                 "type": "object",
-                "properties": {
-                    "server_id": {
-                        "type": "string",
-                        "description": "Discord server (guild) ID"
-                    }
-                },
+                "properties": {"server_id": {"type": "string", "description": "Discord server (guild) ID"}},
                 "required": ["server_id"]
             }
         ),
@@ -165,16 +183,8 @@ async def list_tools() -> List[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "channel_id": {
-                        "type": "string",
-                        "description": "Discord channel ID"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Number of messages to fetch (max 100)",
-                        "minimum": 1,
-                        "maximum": 100
-                    }
+                    "channel_id": {"type": "string", "description": "Discord channel ID"},
+                    "limit": {"type": "number", "description": "Messages to fetch (max 100)", "minimum": 1, "maximum": 100}
                 },
                 "required": ["channel_id"]
             }
@@ -184,65 +194,97 @@ async def list_tools() -> List[Tool]:
             description="Get information about a Discord user",
             inputSchema={
                 "type": "object",
-                "properties": {
-                    "user_id": {
-                        "type": "string",
-                        "description": "Discord user ID"
-                    }
-                },
+                "properties": {"user_id": {"type": "string", "description": "Discord user ID"}},
                 "required": ["user_id"]
             }
         ),
+        Tool(
+            name="list_members",
+            # Tool name: this is the identifier used to call the tool from the LLM or MCP agent.
+            description="Get a list of members in a server",
+            # Human-readable description shown to users/agents for tool discovery.
+            inputSchema={
+                # JSON schema describing the expected input for this tool.
+                "type": "object",  
+                "properties": {
+                    "server_id": {
+                        # The unique identifier for a Discord server ("guild").
+                        # Must be a string because Discord IDs can be very large integers.
+                        "type": "string",
+                        "description": "Discord server (guild) ID"
+                    },
+                    "limit": {
+                        # The maximum number of members to fetch from the server.
+                        # Allows agents to avoid downloading the entire member list for big servers.
+                        "type": "number",
+                        "description": "Maximum number of members to fetch",
+                        "minimum": 1,      # Enforce a minimum to avoid useless calls.
+                        "maximum": 1000    # Discord API maximum limit for a single fetch.
+                    }
+                },
+                "required": ["server_id"]
+                # "server_id" is mandatory for this tool to work.
+                # "limit" is optional; defaults to 100 in the backend if not provided.
+    }
+),
+        Tool(
+    name="list_channels",
+    description="Get a list of all text channels in a Discord server (guild), including their names and channel IDs.",
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "server_id": {
+                "type": "string",
+                "description": "Discord server (guild) ID"
+            }
+        },
+        "required": ["server_id"]
+    }
+),
         Tool(
             name="relationship_analysis",
             description="Analyze relationships between users in a Discord channel",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "channel_id": {
-                        "type": "string",
-                        "description": "Discord channel ID"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Number of messages to analyze (max 100)",
-                        "minimum": 1,
-                        "maximum": 100
-                    }
+                    "channel_id": {"type": "string", "description": "Discord channel ID"},
+                    "limit": {"type": "number", "description": "Messages to analyze (max 100)", "minimum": 1, "maximum": 100}
                 },
                 "required": ["channel_id"]
             }
-        ),
-        Tool(
-            name="llm_summarize",       # ★ new tool
-            description="Return ≤1000-char summary using Claude",
-            inputSchema={
-                "type": "object",
-                " properties": {
-                 "text": {"type": "string"},
-                 "max_chars": {"type": "number"},
-                },
-                "required": ["text"],
-            }
-        ),
+        )
     ]
     summarize_text_tool = Tool(
         name="summarize_text",
-        description="(Internal) Send ≤1000-char DM summary to returning user",
+        description="Collect recent messages (Rules/Calendar/Chat) and return raw text",
+        # Human-readable summary. Explains that this tool gathers the most recent messages from several important channel categories
+        # (e.g., rules/notice, calendar/schedule, and general chat) and simply returns them as plain text blocks.
+        # It does NOT summarize or send DMs directly; that should be handled by an LLM or other logic.
         inputSchema={
             "type": "object",
             "properties": {"user_id": {"type": "string"}},
-            "required": ["user_id"],
-        },
+            "required": ["user_id"]
+        }
     )
+    # Register this tool at the end of the tool list.
     original_tools.append(summarize_text_tool)
     return original_tools
+    # Return the complete list of available tools.
 
 @app.call_tool()
 @require_discord_client
 async def call_tools(name: str, arguments: Any) -> List[TextContent]:
-    """Main tool dispatcher called via MCP."""
+    """
+    Main entrypoint for all MCP tool calls.
+    - Receives tool name and arguments.
+    - Dispatches to the relevant handler for each tool.
+    - Returns a list of TextContent (MCP standard).
+    - All tools except summarize_text have their own specialized handlers.
+    - summarize_text: gathers and returns categorized messages for the given user, to be summarized externally by LLM.
+    """
+
     if name == "get_server_info":
+        # Handles retrieval of general server metadata (name, ID, member count, etc).
         guild = await discord_client.fetch_guild(int(arguments["server_id"]))
         info = {
             "name": guild.name,
@@ -260,41 +302,68 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         )]
 
     elif name == "role_analysis":
+        # Retrieves message and reaction activity for a given channel, for role analysis.
+        
+        # Fetch the Discord text channel object using its unique channel ID.
         channel = await discord_client.fetch_channel(int(arguments["channel_id"]))
+        # Determine how many messages to fetch (limit to max 100 for safety/performance).
         limit = min(int(arguments.get("limit", 10)), 100)
+        # Optionally fetch users who reacted to each message if requested (not used in this snippet).
+        fetch_users = arguments.get("fetch_reaction_users", False)  # Only fetch users if explicitly requested
 
         messages = []
+        
+        # Iterate asynchronously over the latest messages in the channel.
         async for message in channel.history(limit=limit):
+
             reaction_data = []
+
+            # Process all reactions for the current message.
             for reaction in message.reactions:
+                
+                # Try to get the emoji as a name (custom or unicode), or as an ID if not present.
                 emoji_str = str(reaction.emoji.name) if hasattr(reaction.emoji,
                                                                 'name') and reaction.emoji.name else str(
                     reaction.emoji.id) if hasattr(reaction.emoji, 'id') else str(reaction.emoji)
+
                 reaction_info = {
                     "emoji": emoji_str,
                     "count": reaction.count
                 }
+
+                # Log the emoji for debugging or inspection.
+                logger.error(f"Emoji: {emoji_str}")
+
                 reaction_data.append(reaction_info)
+
+            # Append all collected info about the message to the messages list.
             messages.append({
                 "id": str(message.id),
                 "author": str(message.author),
                 "content": message.content,
                 "timestamp": message.created_at.isoformat(),
-                "reactions": reaction_data
+                "reactions": reaction_data  # Add reactions to message dict
             })
+
+        # Helper function to format reactions
+
         def format_reaction(r):
             return f"{r['emoji']}({r['count']})"
+
         return [TextContent(
             type="text",
             text=f"Retrieved {len(messages)} messages:\n\n" +
+
                  "\n".join([
                      f"{m['author']} ({m['timestamp']}): {m['content']}\n" +
                      f"Reactions: {', '.join([format_reaction(r) for r in m['reactions']]) if m['reactions'] else 'No reactions'}"
                      for m in messages
                  ])
+
         )]
 
     elif name == "get_user_info":
+        # Tool to fetch and return user account information by user ID.
         user = await discord_client.fetch_user(int(arguments["user_id"]))
         user_info = {
             "id": str(user.id),
@@ -311,55 +380,66 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                  f"Bot: {user_info['bot']}\n" +
                  f"Created: {user_info['created_at']}"
         )]
-    
+
     elif name == "relationship_analysis":
+        # Analyzes message interactions (mentions, replies, reactions) to estimate user relationships.
         channel = await discord_client.fetch_channel(int(arguments["channel_id"]))
+        
         limit = min(int(arguments.get("limit", 10)), 100)
+
         fetch_users = arguments.get("fetch_users", False)
 
         messages = []
+
         async for message in channel.history(limit=limit):
             reaction_data = []
+
             for reaction in message.reactions:
                 emoji_str = str(reaction.emoji.name) if hasattr(reaction.emoji, 'name') and reaction.emoji.name \
                     else str(reaction.emoji.id) if hasattr(reaction.emoji, 'id') else str(reaction.emoji)
+
                 users = []
-                if fetch_users:
+                if fetch_users: # Optionally fetch usernames of users who reacted
                     try:
-                        reacted_users = []
-                        async for user_obj in reaction.users():
-                            reacted_users.append(f"{user_obj.name}#{user_obj.discriminator}")
-                        users = reacted_users
+                        users = [f"{user.name}#{user.discriminator}" for user in await reaction.users().flatten()]
                     except Exception as e:
                         logger.warning(f"Failed to fetch reaction users for emoji {emoji_str}: {e}")
+
                 reaction_data.append({
                     "emoji": emoji_str,
                     "count": reaction.count,
                     "users": users
                 })
+
             messages.append({
                 "author": str(message.author),
                 "author_id": str(message.author.id),
                 "content": message.content,
-                "mentions": [str(u.id) for u in message.mentions],
+                "mentions": [str(u.id) for u in message.mentions], # List of mentioned user IDs — used to detect direct interactions between users
                 "timestamp": message.created_at.isoformat(),
-                "is_reply": bool(message.reference),
+                "is_reply": bool(message.reference), # Used in relationship analysis to detect reply-based interactions
                 "reactions": reaction_data
             })
+
         messages.sort(key=lambda m: m["timestamp"])
-        def format_reaction_rel(r):
+
+        def format_reaction(r): # Generate a text summary of all messages with formatted reactions
             if r["users"]:
                 return f"{r['emoji']}({r['count']}): {', '.join(r['users'])}"
             else:
                 return f"{r['emoji']}({r['count']})"
+
         summary_text = "Message Summary:\n\n"
         for m in messages:
             summary_text += (
                 f"{m['author']} ({m['timestamp']}): {m['content']}\n"
-                f"Reactions: {', '.join([format_reaction_rel(r) for r in m['reactions']]) if m['reactions'] else 'No reactions'}\n\n"
+                f"Reactions: {', '.join([format_reaction(r) for r in m['reactions']]) if m['reactions'] else 'No reactions'}\n\n"
             )
+
         user_ids = {msg["author_id"]: msg["author"] for msg in messages}
         interaction_counts = defaultdict(lambda: {"mentions": 0, "replies": 0, "reactions": 0})
+        # Track interaction counts (mentions, replies, reactions) between each user pair
+
         for msg in messages:
             sender = msg["author"]
             mentions = msg["mentions"]
@@ -370,47 +450,57 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                     pair = tuple(sorted([sender, mentioned_name]))
                     interaction_counts[pair]["mentions"] += 1
             if is_reply:
-                for other_author_id in user_ids:
-                    if user_ids[other_author_id] != sender :
-                        if message.reference and message.reference.message_id:
-                            pair = tuple(sorted([sender, user_ids[other_author_id]]))
-                            interaction_counts[pair]["replies"] += 1
-            for other_author_id in user_ids:
-                other_author_name = user_ids[other_author_id]
-                if other_author_name != sender:
-                    pair = tuple(sorted([sender, other_author_name]))
-                    interaction_counts[pair]["reactions"] += sum(r["count"] for r in msg["reactions"] if r["count"] > 0)
+                for other in user_ids.values():
+                    if other != sender:
+                        pair = tuple(sorted([sender, other]))
+                        interaction_counts[pair]["replies"] += 1
+            for other in user_ids.values():
+                if other != sender:
+                    pair = tuple(sorted([sender, other]))
+                    interaction_counts[pair]["reactions"] += sum(r["count"] for r in msg["reactions"])
 
         def generate_description(pair, stats):
+            # Generate a summary of interaction types between user pairs
             total = stats["mentions"] + stats["replies"] + stats["reactions"]
             if total == 0:
-                return None
+                return f"{pair[0]} <-> {pair[1]}: No significant interaction observed."
             parts = []
-            if stats["mentions"]: parts.append(f"{stats['mentions']} mention(s)")
-            if stats["replies"]: parts.append(f"{stats['replies']} reply/replies")
-            if stats["reactions"]: parts.append(f"{stats['reactions']} reaction point(s)")
+            if stats["mentions"]:
+                parts.append("mentions")
+            if stats["replies"]:
+                parts.append("replies")
+            if stats["reactions"]:
+                parts.append("reactions")
             return f"{pair[0]} <-> {pair[1]}: Interaction via {', '.join(parts)}."
 
         relationship_descriptions = [
-            desc for desc in (generate_description(pair, stats)
-            for pair, stats in interaction_counts.items()) if desc is not None
+            generate_description(pair, stats)
+            for pair, stats in interaction_counts.items()
         ]
-        if not relationship_descriptions:
-            relationship_report = "Pairwise Relationship Estimates:\nNo significant pairwise interactions observed."
-        else:
-            relationship_report = "Pairwise Relationship Estimates:\n" + "\n".join(relationship_descriptions)
+
+        relationship_report = "Pairwise Relationship Estimates:\n" + "\n".join(relationship_descriptions)
 
         full_output = (
+            # Construct the final analysis output including summary and relationship report
             "Relationship Analysis Report\n"
             "=============================\n\n"
             f"Total messages analyzed: {len(messages)}\n\n"
             f"{summary_text}\n"
             f"{relationship_report}"
         )
+
         return [TextContent(type="text", text=full_output)]
 
     elif name == "summarize_text":
-        # Summarizes messages and sends them as a DM to a returning user
+        """
+        summarize_text Tool:
+        - Receives: {"user_id": ...}
+        - Finds the first guild (server) where both the user and bot exist.
+        - Gathers categorized messages ("notice", "calendar", "talk").
+        - Assembles blocks of raw text for each category.
+        - Returns the combined raw message text as a single TextContent.
+        - Does not DM the user or summarize; simply returns text for LLM to summarize elsewhere.
+        """
         user_id_str = arguments["user_id"]
         try:
             user_id = int(user_id_str)
@@ -418,92 +508,136 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
             logger.warning(f"Invalid user_id format for summarize_text: {user_id_str}")
             return [TextContent(type="text", text="Invalid user_id format")]
 
-        user = await discord_client.fetch_user(user_id)
-        # Find a guild shared by both the bot and the user
+        # Find a mutual server (guild) where the bot can see this user.
         guild = next((g for g in discord_client.guilds if g.get_member(user_id)), None)
-        
         if not guild:
-            logger.warning(f"User {user_id} not found in any mutual guilds with the bot for summarize_text.")
+            logger.warning(f"User {user_id} not found in any mutual guilds with the bot.")
             return [TextContent(type="text", text="User not in a mutual guild or bot cannot see user.")]
 
         buckets = await _gather_messages(guild)
-        raw_parts = []
+        raw_parts: List[str] = []
         if buckets["notice"]:
-            raw_parts.append("【Rules/Notice】\n" + "\n".join(buckets["notice"]))
+            raw_parts.append("【Rules/Notice】\n"  + "\n".join(buckets["notice"]))
         if buckets["calendar"]:
-            raw_parts.append("【Calendar】\n" + "\n".join(buckets["calendar"]))
+            raw_parts.append("【Calendar】\n"     + "\n".join(buckets["calendar"]))
         if buckets["talk"]:
             raw_parts.append("【General/Chat】\n" + "\n".join(buckets["talk"]))
-        
+
         if not raw_parts:
-            # No new messages, just greet the user
-            try:
-                await user.send("Welcome back! No new important messages to summarize since you were last active.")
-                return [TextContent(type="text", text="No messages to summarize, DM sent.")]
-            except discord.Forbidden:
-                logger.warning(f"DM send failed to {user_id}: Bot is not allowed to DM this user.")
-                return [TextContent(type="text", text=f"DM failed: Bot cannot DM user {user_id}")]
-            except Exception as e:
-                logger.warning(f"DM send failed to {user_id}: {e}")
-                return [TextContent(type="text", text=f"DM failed: {e}")]
+            # If there are no messages to report, return a message to that effect.
+            return [TextContent(type="text", text="No new messages to summarize.")]
 
-        raw = "\n\n".join(raw_parts)
-        summary = await _llm_summarize(raw)
+        # Combine all message categories into one string for LLM summarization.
+        raw_text = "\n\n".join(raw_parts)
+        return [TextContent(type="text", text=raw_text)]
+    elif name == "list_members":
+        # Fetch the Discord Guild (server) object by its unique server ID.
+        # This will raise an exception if the ID is invalid or the bot cannot access the guild.
+        guild = await discord_client.fetch_guild(int(arguments["server_id"]))
 
-        try:
-            await user.send(f"Welcome back! Here's a summary of what happened while you were away:\n\n{summary}")
-            logger.info(f"Summary DM sent to user {user_id}")
-            return [TextContent(type="text", text="Summary DM sent")]
-        except discord.Forbidden:
-            logger.warning(f"DM send failed to {user_id}: Bot is not allowed to DM this user.")
-            return [TextContent(type="text", text=f"DM failed: Bot cannot DM user {user_id}")]
-        except Exception as e:
-            logger.warning(f"DM send failed to {user_id}: {e}")
-            return [TextContent(type="text", text=f"DM failed: {e}")]
+        # The limit argument determines how many members to fetch.
+        # Clamp this value between 1 and 1000 for safety/performance (Discord API limit).
+        limit = min(int(arguments.get("limit", 100)), 1000)
     
-    # Unhandled tool name: returns an empty list, as required by the MCP protocol.
+        members = []
+        # Asynchronously iterate through the guild's members up to the requested limit.
+        # fetch_members() returns an AsyncIterator, which can be slow for large servers.
+        async for member in guild.fetch_members(limit=limit):
+            members.append({
+                # Discord user ID (unique across Discord).
+                "id": str(member.id),
+                # Username (without discriminator).
+                "name": member.name,
+                # Optional nickname in this server, if set.
+                "nick": member.nick,
+                # When this user joined the server (ISO8601 string or None if unavailable).
+                "joined_at": member.joined_at.isoformat() if member.joined_at else None,
+                # List of role IDs for this member, as strings. Skips the first role (always @everyone).
+                "roles": [str(role.id) for role in member.roles[1:]]
+            })
+    
+        # The tool returns a single TextContent item summarizing all fetched members.
+        # Output includes the display name, user ID, and their role IDs.
+        return [TextContent(
+            type="text",
+            text=f"Server Members ({len(members)}):\n" + 
+             "\n".join(f"{m['name']} (ID: {m['id']}, Roles: {', '.join(m['roles'])})" for m in members)
+        )]
+        
+    elif name == "list_channels":
+        guild = await discord_client.fetch_guild(int(arguments["server_id"]))
+
+        # Robust way: Find all accessible text channels in this guild using the global channel list.
+        all_text_channels = [
+            ch for ch in discord_client.get_all_channels()
+            if isinstance(ch, discord.TextChannel) and ch.guild.id == guild.id
+        ]
+        # Prepare human-readable output
+        channel_lines = [f"{ch.name} (ID: {ch.id})" for ch in all_text_channels]
+        return [TextContent(
+            type="text",
+            text="Text Channels:\n" + "\n".join(channel_lines)
+    )]
+    
+    # WARNING:
+    # When printing or returning channel names, list members, summarize texts
+    # characters outside basic English or Hangul (such as emojis, 
+    # CJK, or other special Unicode symbols) may appear as corrupted or replacement characters (like '�')
+    # depending on the encoding settings of your Python environment, terminal, or HTTP response handling.
+    # This does not affect functionality, but the display of names may not be accurate unless the full
+    # environment (Python source, output, and all intermediate tools) use UTF-8 or appropriate Unicode support.
+    
+    # Unhandled tool name; return an empty result as per MCP protocol.
     return []
 
-# ─────────────────── Discord Events ───────────────────
+##################################################
+# Discord Event: Member Update (Status Change)
+##################################################
+
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
     """
-    Fired when a member's status is updated (for example, when coming online).
-    If the user comes online after 7+ days of inactivity, trigger the summary DM.
+    Discord event: Fired when a member's status changes (e.g., offline to online).
+    - If user comes online after a period of inactivity (INACTIVE_DAYS or more),
+      trigger the summarize_text tool to collect recent important messages for that user.
+    - Does not send a DM; the summary will be handled elsewhere.
+    - Always updates the last_seen timestamp for the user.
     """
-    # Detect when a user transitions from offline to online
     if before.status == discord.Status.offline and after.status != discord.Status.offline:
         uid = str(after.id)
         now = datetime.utcnow()
-        
+
         last_seen_dt = None
         if uid in last_seen:
             try:
                 last_seen_dt = datetime.fromisoformat(last_seen[uid])
             except ValueError:
-                logger.warning(f"Could not parse ISO format date for user {uid}: {last_seen[uid]}")
+                logger.warning(f"Could not parse ISO date for {uid}: {last_seen[uid]}")
 
-        # If user was inactive for more than the threshold, send them a summary
         if not last_seen_dt or (now - last_seen_dt).days >= INACTIVE_DAYS:
             logger.info(f"User {after.display_name} ({uid}) came online after {INACTIVE_DAYS}+ days. Triggering summary.")
             try:
                 await app.request_tool("summarize_text", {"user_id": uid})
             except Exception as e:
-                logger.error(f"Error requesting summarize_text tool for user {uid}: {e}")
-        
+                logger.error(f"Error requesting summarize_text for {uid}: {e}")
+
         last_seen[uid] = now.isoformat()
         _save_last_seen()
 
+##################################################
+# Main Application Entrypoint (Runs Discord bot & MCP server)
+##################################################
+
 async def main():
-    """Main entrypoint for the Discord bot + MCP server."""
+    """
+    Entrypoint for the application:
+    - Starts the Discord bot in the background.
+    - Starts the MCP server for handling tool calls via stdio.
+    - Keeps both running as long as the program is alive.
+    """
     asyncio.create_task(bot.start(DISCORD_TOKEN))
     async with stdio_server() as (read_stream, write_stream):
-        await app.run(
-            read_stream,
-            write_stream,
-            app.create_initialization_options()
-        )
+        await app.run(read_stream, write_stream, app.create_initialization_options())
 
 if __name__ == "__main__":
     asyncio.run(main())
-
