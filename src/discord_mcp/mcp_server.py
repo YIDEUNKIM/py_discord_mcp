@@ -167,7 +167,7 @@ async def list_tools() -> List[Tool]:
     - Each Tool: name, description, and input schema (for validation)
     - The summarize_text tool is used for gathering categorized messages for a given user.
     """
-    original_tools = [
+    return [
         Tool(
             name="get_server_info",
             description="Get information about a Discord server",
@@ -225,22 +225,22 @@ async def list_tools() -> List[Tool]:
                 "required": ["server_id"]
                 # "server_id" is mandatory for this tool to work.
                 # "limit" is optional; defaults to 100 in the backend if not provided.
-    }
-),
-        Tool(
-    name="list_channels",
-    description="Get a list of all text channels in a Discord server (guild), including their names and channel IDs.",
-    inputSchema={
-        "type": "object",
-        "properties": {
-            "server_id": {
-                "type": "string",
-                "description": "Discord server (guild) ID"
             }
-        },
-        "required": ["server_id"]
-    }
-),
+        ),
+        Tool(
+            name="list_channels",
+            description="Get a list of all text channels in a Discord server (guild), including their names and channel IDs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "server_id": {
+                        "type": "string",
+                        "description": "Discord server (guild) ID"
+                    }
+                },
+                "required": ["server_id"]
+            }
+        ),
         Tool(
             name="relationship_analysis",
             description="Analyze relationships between users in a Discord channel",
@@ -252,24 +252,20 @@ async def list_tools() -> List[Tool]:
                 },
                 "required": ["channel_id"]
             }
+        ),
+        Tool(
+            name="summarize_text",
+            description="Collect recent messages (Rules/Calendar/Chat) and return raw text",
+            # Human-readable summary. Explains that this tool gathers the most recent messages from several important channel categories
+            # (e.g., rules/notice, calendar/schedule, and general chat) and simply returns them as plain text blocks.
+            # It does NOT summarize or send DMs directly; that should be handled by an LLM or other logic.
+            inputSchema={
+                "type": "object",
+                "properties": {"user_id": {"type": "string"}},
+                "required": ["user_id"]
+            }
         )
     ]
-    summarize_text_tool = Tool(
-        name="summarize_text",
-        description="Collect recent messages (Rules/Calendar/Chat) and return raw text",
-        # Human-readable summary. Explains that this tool gathers the most recent messages from several important channel categories
-        # (e.g., rules/notice, calendar/schedule, and general chat) and simply returns them as plain text blocks.
-        # It does NOT summarize or send DMs directly; that should be handled by an LLM or other logic.
-        inputSchema={
-            "type": "object",
-            "properties": {"user_id": {"type": "string"}},
-            "required": ["user_id"]
-        }
-    )
-    # Register this tool at the end of the tool list.
-    original_tools.append(summarize_text_tool)
-    return original_tools
-    # Return the complete list of available tools.
 
 @app.call_tool()
 @require_discord_client
@@ -315,7 +311,6 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         
         # Iterate asynchronously over the latest messages in the channel.
         async for message in channel.history(limit=limit):
-
             reaction_data = []
 
             # Process all reactions for the current message.
@@ -333,7 +328,6 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
 
                 # Log the emoji for debugging or inspection.
                 logger.error(f"Emoji: {emoji_str}")
-
                 reaction_data.append(reaction_info)
 
             # Append all collected info about the message to the messages list.
@@ -342,10 +336,8 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "author": str(message.author),
                 "content": message.content,
                 "timestamp": message.created_at.isoformat(),
-                "reactions": reaction_data  # Add reactions to message dict
+                "reactions": reaction_data
             })
-
-        # Helper function to format reactions
 
         def format_reaction(r):
             return f"{r['emoji']}({r['count']})"
@@ -353,13 +345,11 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         return [TextContent(
             type="text",
             text=f"Retrieved {len(messages)} messages:\n\n" +
-
                  "\n".join([
                      f"{m['author']} ({m['timestamp']}): {m['content']}\n" +
                      f"Reactions: {', '.join([format_reaction(r) for r in m['reactions']]) if m['reactions'] else 'No reactions'}"
                      for m in messages
                  ])
-
         )]
 
     elif name == "get_user_info":
@@ -384,9 +374,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
     elif name == "relationship_analysis":
         # Analyzes message interactions (mentions, replies, reactions) to estimate user relationships.
         channel = await discord_client.fetch_channel(int(arguments["channel_id"]))
-        
         limit = min(int(arguments.get("limit", 10)), 100)
-
         fetch_users = arguments.get("fetch_users", False)
 
         messages = []
@@ -415,7 +403,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "author": str(message.author),
                 "author_id": str(message.author.id),
                 "content": message.content,
-                "mentions": [str(u.id) for u in message.mentions], # List of mentioned user IDs — used to detect direct interactions between users
+                "mentions": [str(u.id) for u in message.mentions],
                 "timestamp": message.created_at.isoformat(),
                 "is_reply": bool(message.reference), # Used in relationship analysis to detect reply-based interactions
                 "reactions": reaction_data
@@ -530,6 +518,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         # Combine all message categories into one string for LLM summarization.
         raw_text = "\n\n".join(raw_parts)
         return [TextContent(type="text", text=raw_text)]
+        
     elif name == "list_members":
         # Fetch the Discord Guild (server) object by its unique server ID.
         # This will raise an exception if the ID is invalid or the bot cannot access the guild.
@@ -577,7 +566,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         return [TextContent(
             type="text",
             text="Text Channels:\n" + "\n".join(channel_lines)
-    )]
+        )]
     
     # WARNING:
     # When printing or returning channel names, list members, summarize texts
