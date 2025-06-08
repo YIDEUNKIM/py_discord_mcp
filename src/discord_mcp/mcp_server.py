@@ -200,14 +200,31 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="list_members",
+            # Tool name: this is the identifier used to call the tool from the LLM or MCP agent.
             description="Get a list of members in a server",
+            # Human-readable description shown to users/agents for tool discovery.
             inputSchema={
-                "type": "object",
+                # JSON schema describing the expected input for this tool.
+                "type": "object",  
                 "properties": {
-                    "server_id": {"type": "string", "description": "Discord server (guild) ID"},
-                    "limit": {"type": "number", "description": "Maximum number of members to fetch", "minimum": 1, "maximum": 1000}
+                    "server_id": {
+                        # The unique identifier for a Discord server ("guild").
+                        # Must be a string because Discord IDs can be very large integers.
+                        "type": "string",
+                        "description": "Discord server (guild) ID"
+                    },
+                    "limit": {
+                        # The maximum number of members to fetch from the server.
+                        # Allows agents to avoid downloading the entire member list for big servers.
+                        "type": "number",
+                        "description": "Maximum number of members to fetch",
+                        "minimum": 1,      # Enforce a minimum to avoid useless calls.
+                        "maximum": 1000    # Discord API maximum limit for a single fetch.
+                    }
                 },
                 "required": ["server_id"]
+                # "server_id" is mandatory for this tool to work.
+                # "limit" is optional; defaults to 100 in the backend if not provided.
             }
         ),
         Tool(
@@ -215,7 +232,12 @@ async def list_tools() -> List[Tool]:
             description="Get a list of all text channels in a Discord server (guild), including their names and channel IDs.",
             inputSchema={
                 "type": "object",
-                "properties": {"server_id": {"type": "string", "description": "Discord server (guild) ID"}},
+                "properties": {
+                    "server_id": {
+                        "type": "string",
+                        "description": "Discord server (guild) ID"
+                    }
+                },
                 "required": ["server_id"]
             }
         ),
@@ -234,6 +256,9 @@ async def list_tools() -> List[Tool]:
         Tool(
             name="summarize_text",
             description="Collect recent messages (Rules/Calendar/Chat) and return raw text",
+            # Human-readable summary. Explains that this tool gathers the most recent messages from several important channel categories
+            # (e.g., rules/notice, calendar/schedule, and general chat) and simply returns them as plain text blocks.
+            # It does NOT summarize or send DMs directly; that should be handled by an LLM or other logic.
             inputSchema={
                 "type": "object",
                 "properties": {"user_id": {"type": "string"}},
@@ -255,6 +280,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
     """
 
     if name == "get_server_info":
+        # Handles retrieval of general server metadata (name, ID, member count, etc).
         guild = await discord_client.fetch_guild(int(arguments["server_id"]))
         info = {
             "name": guild.name,
@@ -272,17 +298,27 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         )]
 
     elif name == "role_analysis":
+        # Retrieves message and reaction activity for a given channel, for role analysis.
+        
+        # Fetch the Discord text channel object using its unique channel ID.
         channel = await discord_client.fetch_channel(int(arguments["channel_id"]))
+        # Determine how many messages to fetch (limit to max 100 for safety/performance).
         limit = min(int(arguments.get("limit", 10)), 100)
-        fetch_users = arguments.get("fetch_reaction_users", False)
+        # Optionally fetch users who reacted to each message if requested (not used in this snippet).
+        fetch_users = arguments.get("fetch_reaction_users", False)  # Only fetch users if explicitly requested
 
         messages = []
         
+        # Iterate asynchronously over the latest messages in the channel.
         async for message in channel.history(limit=limit):
             reaction_data = []
 
+            # Process all reactions for the current message.
             for reaction in message.reactions:
-                emoji_str = str(reaction.emoji.name) if hasattr(reaction.emoji, 'name') and reaction.emoji.name else str(
+                
+                # Try to get the emoji as a name (custom or unicode), or as an ID if not present.
+                emoji_str = str(reaction.emoji.name) if hasattr(reaction.emoji,
+                                                                'name') and reaction.emoji.name else str(
                     reaction.emoji.id) if hasattr(reaction.emoji, 'id') else str(reaction.emoji)
 
                 reaction_info = {
@@ -290,9 +326,11 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                     "count": reaction.count
                 }
 
+                # Log the emoji for debugging or inspection.
                 logger.error(f"Emoji: {emoji_str}")
                 reaction_data.append(reaction_info)
 
+            # Append all collected info about the message to the messages list.
             messages.append({
                 "id": str(message.id),
                 "author": str(message.author),
@@ -315,6 +353,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         )]
 
     elif name == "get_user_info":
+        # Tool to fetch and return user account information by user ID.
         user = await discord_client.fetch_user(int(arguments["user_id"]))
         user_info = {
             "id": str(user.id),
@@ -333,6 +372,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         )]
 
     elif name == "relationship_analysis":
+        # Analyzes message interactions (mentions, replies, reactions) to estimate user relationships.
         channel = await discord_client.fetch_channel(int(arguments["channel_id"]))
         limit = min(int(arguments.get("limit", 10)), 100)
         fetch_users = arguments.get("fetch_users", False)
@@ -347,7 +387,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                     else str(reaction.emoji.id) if hasattr(reaction.emoji, 'id') else str(reaction.emoji)
 
                 users = []
-                if fetch_users:
+                if fetch_users: # Optionally fetch usernames of users who reacted
                     try:
                         users = [f"{user.name}#{user.discriminator}" for user in await reaction.users().flatten()]
                     except Exception as e:
@@ -365,13 +405,13 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                 "content": message.content,
                 "mentions": [str(u.id) for u in message.mentions],
                 "timestamp": message.created_at.isoformat(),
-                "is_reply": bool(message.reference),
+                "is_reply": bool(message.reference), # Used in relationship analysis to detect reply-based interactions
                 "reactions": reaction_data
             })
 
         messages.sort(key=lambda m: m["timestamp"])
 
-        def format_reaction(r):
+        def format_reaction(r): # Generate a text summary of all messages with formatted reactions
             if r["users"]:
                 return f"{r['emoji']}({r['count']}): {', '.join(r['users'])}"
             else:
@@ -386,6 +426,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
 
         user_ids = {msg["author_id"]: msg["author"] for msg in messages}
         interaction_counts = defaultdict(lambda: {"mentions": 0, "replies": 0, "reactions": 0})
+        # Track interaction counts (mentions, replies, reactions) between each user pair
 
         for msg in messages:
             sender = msg["author"]
@@ -407,6 +448,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
                     interaction_counts[pair]["reactions"] += sum(r["count"] for r in msg["reactions"])
 
         def generate_description(pair, stats):
+            # Generate a summary of interaction types between user pairs
             total = stats["mentions"] + stats["replies"] + stats["reactions"]
             if total == 0:
                 return f"{pair[0]} <-> {pair[1]}: No significant interaction observed."
@@ -427,6 +469,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         relationship_report = "Pairwise Relationship Estimates:\n" + "\n".join(relationship_descriptions)
 
         full_output = (
+            # Construct the final analysis output including summary and relationship report
             "Relationship Analysis Report\n"
             "=============================\n\n"
             f"Total messages analyzed: {len(messages)}\n\n"
@@ -437,6 +480,15 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
         return [TextContent(type="text", text=full_output)]
 
     elif name == "summarize_text":
+        """
+        summarize_text Tool:
+        - Receives: {"user_id": ...}
+        - Finds the first guild (server) where both the user and bot exist.
+        - Gathers categorized messages ("notice", "calendar", "talk").
+        - Assembles blocks of raw text for each category.
+        - Returns the combined raw message text as a single TextContent.
+        - Does not DM the user or summarize; simply returns text for LLM to summarize elsewhere.
+        """
         user_id_str = arguments["user_id"]
         try:
             user_id = int(user_id_str)
@@ -444,6 +496,7 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
             logger.warning(f"Invalid user_id format for summarize_text: {user_id_str}")
             return [TextContent(type="text", text="Invalid user_id format")]
 
+        # Find a mutual server (guild) where the bot can see this user.
         guild = next((g for g in discord_client.guilds if g.get_member(user_id)), None)
         if not guild:
             logger.warning(f"User {user_id} not found in any mutual guilds with the bot.")
@@ -459,25 +512,41 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
             raw_parts.append("【General/Chat】\n" + "\n".join(buckets["talk"]))
 
         if not raw_parts:
+            # If there are no messages to report, return a message to that effect.
             return [TextContent(type="text", text="No new messages to summarize.")]
 
+        # Combine all message categories into one string for LLM summarization.
         raw_text = "\n\n".join(raw_parts)
         return [TextContent(type="text", text=raw_text)]
         
     elif name == "list_members":
+        # Fetch the Discord Guild (server) object by its unique server ID.
+        # This will raise an exception if the ID is invalid or the bot cannot access the guild.
         guild = await discord_client.fetch_guild(int(arguments["server_id"]))
+
+        # The limit argument determines how many members to fetch.
+        # Clamp this value between 1 and 1000 for safety/performance (Discord API limit).
         limit = min(int(arguments.get("limit", 100)), 1000)
     
         members = []
+        # Asynchronously iterate through the guild's members up to the requested limit.
+        # fetch_members() returns an AsyncIterator, which can be slow for large servers.
         async for member in guild.fetch_members(limit=limit):
             members.append({
+                # Discord user ID (unique across Discord).
                 "id": str(member.id),
+                # Username (without discriminator).
                 "name": member.name,
+                # Optional nickname in this server, if set.
                 "nick": member.nick,
+                # When this user joined the server (ISO8601 string or None if unavailable).
                 "joined_at": member.joined_at.isoformat() if member.joined_at else None,
+                # List of role IDs for this member, as strings. Skips the first role (always @everyone).
                 "roles": [str(role.id) for role in member.roles[1:]]
             })
     
+        # The tool returns a single TextContent item summarizing all fetched members.
+        # Output includes the display name, user ID, and their role IDs.
         return [TextContent(
             type="text",
             text=f"Server Members ({len(members)}):\n" + 
@@ -487,16 +556,27 @@ async def call_tools(name: str, arguments: Any) -> List[TextContent]:
     elif name == "list_channels":
         guild = await discord_client.fetch_guild(int(arguments["server_id"]))
 
+        # Robust way: Find all accessible text channels in this guild using the global channel list.
         all_text_channels = [
             ch for ch in discord_client.get_all_channels()
             if isinstance(ch, discord.TextChannel) and ch.guild.id == guild.id
         ]
+        # Prepare human-readable output
         channel_lines = [f"{ch.name} (ID: {ch.id})" for ch in all_text_channels]
         return [TextContent(
             type="text",
             text="Text Channels:\n" + "\n".join(channel_lines)
         )]
     
+    # WARNING:
+    # When printing or returning channel names, list members, summarize texts
+    # characters outside basic English or Hangul (such as emojis, 
+    # CJK, or other special Unicode symbols) may appear as corrupted or replacement characters (like '�')
+    # depending on the encoding settings of your Python environment, terminal, or HTTP response handling.
+    # This does not affect functionality, but the display of names may not be accurate unless the full
+    # environment (Python source, output, and all intermediate tools) use UTF-8 or appropriate Unicode support.
+    
+    # Unhandled tool name; return an empty result as per MCP protocol.
     return []
 
 ##################################################
